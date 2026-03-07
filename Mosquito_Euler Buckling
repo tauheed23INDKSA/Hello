@@ -1,0 +1,410 @@
+function Mosquito_Euler_Buckling
+%% Mosquito + Euler Buckling 
+
+clc; close all;
+
+%% -------------------------
+S.E_GPa = 200;      % GPa
+S.L_m   = 1.0;      % m
+S.P_kN  = 2.0;      % kN
+
+S.endSel = 1;       % 1=PP,2=FF,3=FP,4=FC
+S.csType = 1;       % 1=Circle,2=Rectangle
+
+S.d_mm = 10;        % circle diameter
+S.b_mm = 10;        % rectangle width
+S.h_mm = 10;        % rectangle height
+
+S.stopSweep = false;
+
+
+%% -------------------------
+fig = figure('Color','w','Position',[60 60 1250 720], ...
+    'Name','Mosquito Euler Buckling (Interactive, Clean Layout)');
+
+% Normalize for axes, but use pixel layout inside panel
+set(fig,'Units','normalized');
+
+%% -------------------------
+% Axes: Left (mosquito + column)
+%% -------------------------
+S.axA = axes('Parent',fig,'Position',[0.05 0.08 0.53 0.87]);
+hold(S.axA,'on'); grid(S.axA,'on'); axis(S.axA,'equal');
+xlabel(S.axA,'Lateral deflection x (m)');
+ylabel(S.axA,'Column axis y (m)');
+title(S.axA,'Mosquito applying compression → Euler buckling (mode shape visualization)');
+set(S.axA,'YDir','reverse');
+
+%% -------------------------
+% Axes: Right-top (boundary curve)
+%% -------------------------
+S.axB = axes('Parent',fig,'Position',[0.62 0.58 0.33 0.37]);
+hold(S.axB,'on'); grid(S.axB,'on');
+xlabel(S.axB,'Length L (m)');
+ylabel(S.axB,'Critical load P_{cr} (kN)');
+title(S.axB,'Buckling boundary: P_{cr}(L)');
+
+%% -------------------------
+% Right-bottom controls panel (NO OVERLAP)
+%% -------------------------
+S.panel = uipanel('Parent',fig,'Units','normalized', ...
+    'Position',[0.62 0.08 0.33 0.46], ...
+    'Title','Controls','FontSize',11);
+
+% We'll position controls in pixels inside the panel
+set(S.panel,'Units','pixels');
+p = get(S.panel,'Position'); 
+
+%% -------------------------
+% Controls (inside panel)
+%% -------------------------
+% Helper for pixel placement inside panel
+pad = 12;
+rowH = 28;
+labW = 110;
+ctrlW = 210;
+x0 = pad;
+x1 = x0 + labW + 8;
+
+% Row positions from top down
+S = buildControls(fig, S, pad, rowH, labW, ctrlW, x0, x1);
+
+%% -------------------------
+% Graphics objects
+%% -------------------------
+% Column line 
+S.colLine = plot(S.axA,[0 0],[0 S.L_m],'k','LineWidth',3);
+S.supportBot = plot(S.axA,0,S.L_m,'ks','MarkerFaceColor','k','MarkerSize',7);
+
+% Mosquito (simple)
+S.mosqBody = rectangle(S.axA,'Position',[-0.15 -0.25 0.30 0.18], ...
+    'Curvature',[1 1],'FaceColor',[0.2 0.2 0.2],'EdgeColor','none');
+S.mosqWingL = patch(S.axA,[-0.12 -0.35 -0.12],[-0.16 -0.28 -0.12],[0.8 0.8 0.8], ...
+    'FaceAlpha',0.5,'EdgeColor','none');
+S.mosqWingR = patch(S.axA,[ 0.12  0.35  0.12],[-0.16 -0.28 -0.12],[0.8 0.8 0.8], ...
+    'FaceAlpha',0.5,'EdgeColor','none');
+
+S.forceArrow = quiver(S.axA,0,-0.02,0,0.25,0,'LineWidth',2,'MaxHeadSize',1.5);
+S.forceLabel = text(S.axA,0.02,0.18,'','FontSize',12,'FontWeight','bold');
+
+% Boundary plot objects
+S.boundCurve = plot(S.axB,nan,nan,'b','LineWidth',2);
+S.curPoint   = plot(S.axB,nan,nan,'ro','MarkerFaceColor','r');
+S.buckPoint  = plot(S.axB,nan,nan,'ks','MarkerFaceColor','y');
+
+%% -------------------------
+% Store + callbacks
+%% -------------------------
+guidata(fig,S);
+
+set([S.sE S.sL S.sP S.popEnd S.popCS], 'Callback', @(~,~) redraw(fig));
+set([S.editD S.editB S.editH],         'Callback', @(~,~) redraw(fig));
+
+S.btnStop.Callback  = @(~,~) stopSweep(fig);
+S.btnSweep.Callback = @(~,~) sweepP(fig);
+
+
+set(fig,'SizeChangedFcn', @(~,~) onResize(fig));
+
+% Initial draw
+redraw(fig);
+
+end % end main
+
+
+%% =========================================================
+% Build controls (panel pixel layout)
+%% =========================================================
+function S = buildControls(fig, S, pad, rowH, labW, ctrlW, x0, x1)
+
+% Get panel size in pixels
+set(S.panel,'Units','pixels');
+pp = get(S.panel,'Position');
+H = pp(4);
+
+% Convenience: y position from top
+yTop = H - pad - rowH;
+
+% --- E slider
+uicontrol('Parent',S.panel,'Style','text','Units','pixels', ...
+    'Position',[x0 yTop labW rowH],'String','E (GPa)','BackgroundColor','w','HorizontalAlignment','left');
+S.sE = uicontrol('Parent',S.panel,'Style','slider','Units','pixels', ...
+    'Position',[x1 yTop+6 ctrlW 16],'Min',10,'Max',250,'Value',S.E_GPa);
+
+% --- L slider
+yTop = yTop - rowH - 8;
+uicontrol('Parent',S.panel,'Style','text','Units','pixels', ...
+    'Position',[x0 yTop labW rowH],'String','L (m)','BackgroundColor','w','HorizontalAlignment','left');
+S.sL = uicontrol('Parent',S.panel,'Style','slider','Units','pixels', ...
+    'Position',[x1 yTop+6 ctrlW 16],'Min',0.2,'Max',3.0,'Value',S.L_m);
+
+% --- P slider
+yTop = yTop - rowH - 8;
+uicontrol('Parent',S.panel,'Style','text','Units','pixels', ...
+    'Position',[x0 yTop labW rowH],'String','P (kN)','BackgroundColor','w','HorizontalAlignment','left');
+S.sP = uicontrol('Parent',S.panel,'Style','slider','Units','pixels', ...
+    'Position',[x1 yTop+6 ctrlW 16],'Min',0,'Max',80,'Value',S.P_kN);
+
+% --- End condition
+yTop = yTop - rowH - 8;
+uicontrol('Parent',S.panel,'Style','text','Units','pixels', ...
+    'Position',[x0 yTop labW rowH],'String','End condition','BackgroundColor','w','HorizontalAlignment','left');
+S.popEnd = uicontrol('Parent',S.panel,'Style','popupmenu','Units','pixels', ...
+    'Position',[x1 yTop+3 ctrlW rowH], ...
+    'String',{'Pinned-Pinned (K=1.0)','Fixed-Fixed (K=0.5)','Fixed-Pinned (K=0.699)','Fixed-Free (K=2.0)'}, ...
+    'Value',S.endSel);
+
+% --- Cross-section
+yTop = yTop - rowH - 8;
+uicontrol('Parent',S.panel,'Style','text','Units','pixels', ...
+    'Position',[x0 yTop labW rowH],'String','Section','BackgroundColor','w','HorizontalAlignment','left');
+S.popCS = uicontrol('Parent',S.panel,'Style','popupmenu','Units','pixels', ...
+    'Position',[x1 yTop+3 ctrlW rowH], ...
+    'String',{'Circle (d)','Rectangle (b,h)'}, ...
+    'Value',S.csType);
+
+% --- Dimensions row: d, b, h
+yTop = yTop - rowH - 8;
+uicontrol('Parent',S.panel,'Style','text','Units','pixels', ...
+    'Position',[x0 yTop 24 rowH],'String','d','BackgroundColor','w','HorizontalAlignment','left');
+S.editD = uicontrol('Parent',S.panel,'Style','edit','Units','pixels', ...
+    'Position',[x0+18 yTop+3 52 rowH],'String',num2str(S.d_mm));
+
+uicontrol('Parent',S.panel,'Style','text','Units','pixels', ...
+    'Position',[x0+80 yTop 24 rowH],'String','b','BackgroundColor','w','HorizontalAlignment','left');
+S.editB = uicontrol('Parent',S.panel,'Style','edit','Units','pixels', ...
+    'Position',[x0+98 yTop+3 52 rowH],'String',num2str(S.b_mm));
+
+uicontrol('Parent',S.panel,'Style','text','Units','pixels', ...
+    'Position',[x0+160 yTop 24 rowH],'String','h','BackgroundColor','w','HorizontalAlignment','left');
+S.editH = uicontrol('Parent',S.panel,'Style','edit','Units','pixels', ...
+    'Position',[x0+178 yTop+3 52 rowH],'String',num2str(S.h_mm));
+
+uicontrol('Parent',S.panel,'Style','text','Units','pixels', ...
+    'Position',[x0+240 yTop labW rowH],'String','(mm)','BackgroundColor','w','HorizontalAlignment','left');
+
+% --- Buttons
+yTop = yTop - rowH - 12;
+S.btnSweep = uicontrol('Parent',S.panel,'Style','pushbutton','Units','pixels', ...
+    'Position',[x0 yTop 150 34],'String','Sweep P → Buckling', ...
+    'FontSize',10,'FontWeight','bold');
+S.btnStop = uicontrol('Parent',S.panel,'Style','pushbutton','Units','pixels', ...
+    'Position',[x0+160 yTop 90 34],'String','Stop', ...
+    'FontSize',10);
+
+% --- Info text area (bottom)
+yTop = yTop - 165;
+S.info = uicontrol('Parent',S.panel,'Style','text','Units','pixels', ...
+    'Position',[x0 yTop ctrlW+labW 155], ...
+    'FontSize',10,'BackgroundColor','w','HorizontalAlignment','left','String','');
+
+% Make panel background white
+set(S.panel,'BackgroundColor','w');
+
+% Save back
+guidata(fig,S);
+end
+
+
+%% =========================================================
+% Resize handler: rebuild panel controls cleanly
+%% =========================================================
+function onResize(fig)
+if ~ishandle(fig), return; end
+S = guidata(fig);
+
+% Delete all panel children and rebuild
+kids = allchild(S.panel);
+delete(kids);
+
+pad = 12; rowH = 28; labW = 110; ctrlW = 210; x0 = pad; x1 = x0 + labW + 8;
+S = buildControls(fig, S, pad, rowH, labW, ctrlW, x0, x1);
+
+% Re-wire callbacks 
+set([S.sE S.sL S.sP S.popEnd S.popCS], 'Callback', @(~,~) redraw(fig));
+set([S.editD S.editB S.editH],         'Callback', @(~,~) redraw(fig));
+S.btnStop.Callback  = @(~,~) stopSweep(fig);
+S.btnSweep.Callback = @(~,~) sweepP(fig);
+
+ 
+redraw(fig);
+end
+
+
+%% =========================================================
+% Redraw all plots
+%% =========================================================
+function redraw(fig)
+if ~ishandle(fig), return; end
+S = guidata(fig);
+
+% Read UI
+E = get(S.sE,'Value') * 1e9;         % Pa
+L = get(S.sL,'Value');              % m
+P = get(S.sP,'Value') * 1000;       % N
+endSel = get(S.popEnd,'Value');
+csType = get(S.popCS,'Value');
+
+% K factor
+K = getK(endSel);
+
+% I from cross-section
+[I, csStr, dimsStr] = getI(csType, S.editD, S.editB, S.editH);
+
+% Euler critical load
+Pcr = (pi^2 * E * I) / (K*L)^2;      % N
+ratio = P / max(Pcr, eps);
+
+% Mode shape (visualization)
+n = 250;
+yy = linspace(0,L,n)';
+
+imperf = 0.002 * L;
+if ratio <= 1
+    A = imperf * (0.3 + 0.7*ratio);
+    statusStr = 'Stable (P < P_{cr})';
+else
+    A = imperf + 0.03*L*min((ratio-1),3);
+    statusStr = 'Buckling (P > P_{cr})';
+end
+
+switch endSel
+    case 1
+        xx = A * sin(pi*yy/L);
+    case 2
+        xx = A * (1 - cos(2*pi*yy/L))/2;
+    case 3
+        xx = A * sin(pi*yy/L) .* (0.6 + 0.4*(yy/L));
+    otherwise
+        xx = A * (1 - cos((pi/2)*yy/L));
+end
+
+% Update column
+set(S.colLine,'XData',xx,'YData',yy);
+set(S.supportBot,'XData',0,'YData',L);
+
+% Mosquito + force arrow
+mosqY = -0.25*L;
+set(S.mosqBody,'Position',[-0.15, mosqY, 0.30, 0.18*L]);
+
+flap = 0.04*L * sin(2*pi*3*now*24*3600);
+set(S.mosqWingL,'XData',[-0.12 -0.35 -0.12], 'YData',[mosqY+0.04*L+flap mosqY-0.08*L mosqY+0.08*L]);
+set(S.mosqWingR,'XData',[ 0.12  0.35  0.12], 'YData',[mosqY+0.04*L+flap mosqY-0.08*L mosqY+0.08*L]);
+
+Pref = 20e3; % N
+arrowLen = 0.35*L * min(P/Pref, 1);
+set(S.forceArrow,'XData',0,'YData',mosqY+0.14*L,'UData',0,'VData',arrowLen);
+set(S.forceLabel,'Position',[0.02, mosqY+0.14*L+arrowLen, 0], ...
+    'String',sprintf('P = %.1f kN',P/1000));
+
+% Axis limits
+span = max(0.05*L, 4*max(abs(xx)));
+xlim(S.axA,[-span span]);
+ylim(S.axA,[-0.35*L L]);
+
+% Boundary curve
+Lgrid = linspace(0.2,3.0,250);
+PcrGrid = (pi^2 * E * I) ./ (K*Lgrid).^2; % N
+set(S.boundCurve,'XData',Lgrid,'YData',PcrGrid/1000);
+set(S.curPoint,'XData',L,'YData',Pcr/1000);
+
+% Info text (in panel)
+set(S.info,'String',sprintf([ ...
+    'Euler buckling:\n  P_{cr} = \\pi^2 E I / (K L)^2\n\n', ...
+    'Status: %s\n\n', ...
+    'Inputs:\n  E = %.1f GPa\n  L = %.2f m\n  K = %.3f\n  %s\n  %s\n\n', ...
+    'Computed:\n  I = %.3e m^4\n  P = %.2f kN\n  P_{cr} = %.2f kN\n  P/P_{cr} = %.2f\n'], ...
+    statusStr, E/1e9, L, K, csStr, dimsStr, I, P/1000, Pcr/1000, ratio));
+
+guidata(fig,S);
+drawnow limitrate;
+end
+
+
+%% =========================================================
+% Sweep
+%% =========================================================
+function sweepP(fig)
+if ~ishandle(fig), return; end
+S = guidata(fig);
+S.stopSweep = false;
+guidata(fig,S);
+
+step_kN = 0.2;
+
+PkN = get(S.sP,'Value');
+Pmax = get(S.sP,'Max');
+
+while ishandle(fig)
+    S = guidata(fig);
+    if S.stopSweep, break; end
+
+    PkN = min(PkN + step_kN, Pmax);
+    set(S.sP,'Value',PkN);
+
+    redraw(fig);
+
+    % buckling check
+    E = get(S.sE,'Value') * 1e9;
+    L = get(S.sL,'Value');
+    endSel = get(S.popEnd,'Value');
+    csType = get(S.popCS,'Value');
+    K = getK(endSel);
+    [I,~,~] = getI(csType, S.editD, S.editB, S.editH);
+
+    Pcr = (pi^2 * E * I) / (K*L)^2;   % N
+    P   = PkN * 1000;                % N
+
+    if P >= Pcr
+        set(S.buckPoint,'XData',L,'YData',Pcr/1000);
+        break;
+    end
+
+    if PkN >= Pmax, break; end
+    pause(0.03);
+end
+end
+
+function stopSweep(fig)
+if ~ishandle(fig), return; end
+S = guidata(fig);
+S.stopSweep = true;
+guidata(fig,S);
+end
+
+
+%% =========================================================
+% Helpers
+%% =========================================================
+function K = getK(sel)
+switch sel
+    case 1, K = 1.0;
+    case 2, K = 0.5;
+    case 3, K = 0.699;
+    otherwise, K = 2.0;
+end
+end
+
+function [I, csStr, dimsStr] = getI(csType, editD, editB, editH)
+d_mm = str2double(get(editD,'String'));
+b_mm = str2double(get(editB,'String'));
+h_mm = str2double(get(editH,'String'));
+
+if isnan(d_mm) || d_mm<=0, d_mm = 10; set(editD,'String','10'); end
+if isnan(b_mm) || b_mm<=0, b_mm = 10; set(editB,'String','10'); end
+if isnan(h_mm) || h_mm<=0, h_mm = 10; set(editH,'String','10'); end
+
+d = d_mm * 1e-3;
+b = b_mm * 1e-3;
+h = h_mm * 1e-3;
+
+if csType == 1
+    I = pi * d^4 / 64;
+    csStr = 'Cross-section: Circle';
+    dimsStr = sprintf('d = %.1f mm', d_mm);
+else
+    I = b * h^3 / 12;
+    csStr = 'Cross-section: Rectangle';
+    dimsStr = sprintf('b = %.1f mm,  h = %.1f mm', b_mm, h_mm);
+end
+end
