@@ -1,0 +1,186 @@
+######## Mosquito Feeding Simulation with Sliders######
+%% Mosquito Feeding Simulation with Sliders (Radius, Viscosity, Pump Rate)
+
+clear; clc; close all;
+
+%% Constants (physics)
+Pmean = 2500;          % Pa
+Pamp  = 1500;          % Pa
+L     = 2e-3;          % m (proboscis length)
+
+%% Time settings
+dt    = 0.02;          % s
+t_end = 15;            % s
+t     = 0:dt:t_end;
+N     = numel(t);
+
+%% Initial slider values
+r_um0   = 15;          % um
+mu_mPa0 = 3.5;         % mPa*s
+f0      = 6;           % Hz
+
+%% Create figure
+fig = figure('Color','w','Position',[80 80 1050 560], ...
+             'Name','Mosquito Blood Feeding (Interactive)');
+
+%% Axes (plots)
+axP = axes('Parent',fig,'Position',[0.06 0.60 0.38 0.32]);
+axQ = axes('Parent',fig,'Position',[0.06 0.14 0.38 0.32]);
+
+%% Axes (animation)
+axA = axes('Parent',fig,'Position',[0.52 0.18 0.44 0.72]);
+hold(axA,'on'); axis(axA,'equal'); axis(axA,[-1 7 -3 3]); axis(axA,'off');
+title(axA,'Mosquito Feeding Animation');
+
+% Skin
+rectangle(axA,'Position',[0 -0.4 0.3 0.8], ...
+    'FaceColor',[0.85 0.65 0.55],'EdgeColor','none');
+
+% Proboscis
+plot(axA,[0.3 4.2],[0 0],'k','LineWidth',2);
+
+% Head
+rectangle(axA,'Position',[4.2 -0.3 0.4 0.6], ...
+    'Curvature',[1 1],'FaceColor',[0.2 0.2 0.2],'EdgeColor','none');
+
+% Body outline
+rectangle(axA,'Position',[4.6 -1 1.6 2], ...
+    'Curvature',[1 1],'EdgeColor','k','LineWidth',1.5);
+
+% Blood fill (animated)
+bloodFill = rectangle(axA,'Position',[4.6 -1 0 2], ...
+    'Curvature',[1 1],'FaceColor','red','EdgeColor','red');
+
+% Wings
+wingL = patch(axA,[4.8 5.6 5.2],[0.6 1.6 0.6],[0.8 0.8 0.8], ...
+    'FaceAlpha',1.0,'EdgeColor','green');
+wingR = patch(axA,[4.8 5.6 5.2],[-0.6 -1.6 -0.6],[0.8 0.8 0.8], ...
+    'FaceAlpha',1.0,'EdgeColor','green');
+
+dotHandle = gobjects(0);
+
+%% Plot lines (initialize)
+axes(axP);
+pLine = plot(axP,nan(1,N),nan(1,N),'b','LineWidth',2); grid(axP,'on');
+xlabel(axP,'Time [s]'); ylabel(axP,'Pressure [kPa]');
+title(axP,'Pump Suction Pressure'); xlim(axP,[0 t_end]);
+
+axes(axQ);
+qLine = plot(axQ,nan(1,N),nan(1,N),'r','LineWidth',2); grid(axQ,'on');
+xlabel(axQ,'Time [s]'); ylabel(axQ,'Flow [nL/s]');
+title(axQ,'Flow Through Proboscis'); xlim(axQ,[0 t_end]);
+
+%% Status text
+txt = uicontrol('Style','text','Parent',fig,'Units','normalized', ...
+    'Position',[0.52 0.08 0.44 0.06],'FontSize',11,'BackgroundColor','w', ...
+    'HorizontalAlignment','left','String','');
+
+%% Sliders + labels
+uicontrol('Style','text','Parent',fig,'Units','normalized','BackgroundColor','w', ...
+    'Position',[0.06 0.95 0.12 0.035],'String','Radius r (\mum)','FontSize',10);
+sR = uicontrol('Style','slider','Parent',fig,'Units','normalized', ...
+    'Position',[0.18 0.955 0.26 0.03],'Min',8,'Max',25,'Value',r_um0);
+
+uicontrol('Style','text','Parent',fig,'Units','normalized','BackgroundColor','w', ...
+    'Position',[0.06 0.905 0.12 0.035],'String','Viscosity \mu (mPa·s)','FontSize',10);
+sMu = uicontrol('Style','slider','Parent',fig,'Units','normalized', ...
+    'Position',[0.18 0.91 0.26 0.03],'Min',1.5,'Max',8,'Value',mu_mPa0);
+
+uicontrol('Style','text','Parent',fig,'Units','normalized','BackgroundColor','w', ...
+    'Position',[0.06 0.86 0.12 0.035],'String','Pump rate f (Hz)','FontSize',10);
+sF = uicontrol('Style','slider','Parent',fig,'Units','normalized', ...
+    'Position',[0.18 0.865 0.26 0.03],'Min',1,'Max',12,'Value',f0);
+
+valR  = uicontrol('Style','text','Parent',fig,'Units','normalized','BackgroundColor','w', ...
+    'Position',[0.45 0.95 0.05 0.035],'String','');
+valMu = uicontrol('Style','text','Parent',fig,'Units','normalized','BackgroundColor','w', ...
+    'Position',[0.45 0.905 0.05 0.035],'String','');
+valF  = uicontrol('Style','text','Parent',fig,'Units','normalized','BackgroundColor','w', ...
+    'Position',[0.45 0.86 0.05 0.035],'String','');
+
+%% Preallocate time series arrays 
+P_kPa = nan(1,N);
+Q_nLs = nan(1,N);
+V_uL  = nan(1,N);
+
+%% Main loop
+k = 1;
+V_running = 0;  % [m^3] running volume integral
+
+while ishandle(fig)
+
+    % Read slider values
+    r_um   = get(sR,'Value');
+    mu_mPa = get(sMu,'Value');
+    f      = get(sF,'Value');
+
+    set(valR,'String',sprintf('%.1f',r_um));
+    set(valMu,'String',sprintf('%.1f',mu_mPa));
+    set(valF,'String',sprintf('%.1f',f));
+
+    % Unit conversions
+    r  = r_um * 1e-6;         % m
+    mu = mu_mPa * 1e-3;       % Pa*s
+
+    % Compute pressure at current time
+    P = Pmean + Pamp*sin(2*pi*f*t(k));
+    if P < 0, P = 0; end      % suction only
+
+    % Poiseuille resistance + flow
+    R = 8*mu*L/(pi*r^4);
+    Q = P / R;                % m^3/s
+
+    % Running integration
+    if k == 1
+        V_running = 0;        % reset at start of each cycle
+    else
+        V_running = V_running + Q*dt;
+    end
+
+    % Store series
+    P_kPa(k) = P/1000;
+    Q_nLs(k) = Q*1e12;        % nL/s
+    V_uL(k)  = V_running*1e9; % uL
+
+    % Update plots (up to k)
+    set(pLine,'XData',t(1:k),'YData',P_kPa(1:k));
+    ylim(axP,[0 (Pmean+Pamp)/1000*1.2]);
+
+    set(qLine,'XData',t(1:k),'YData',Q_nLs(1:k));
+    % scale y-lim using current params (fast + stable)
+    Qmax_est = ((Pmean+Pamp) / R) * 1e12;
+    ylim(axQ,[0 Qmax_est*1.2]);
+
+    % Update body fill (2 uL fills whole body)
+    fillFrac = min(V_uL(k)/2,1);
+    set(bloodFill,'Position',[4.6 -1 1.6*fillFrac 2]);
+
+    % Wing flap
+    flap = 0.5*sin(20*t(k));
+    set(wingL,'YData',[0.6+flap 1.6+flap 0.6+flap]);
+    set(wingR,'YData',[-0.6-flap -1.6-flap -0.6-flap]);
+
+    % Flow dots
+    if mod(k,5)==0
+        if ~isempty(dotHandle) && all(ishandle(dotHandle))
+            delete(dotHandle);
+        end
+        dotHandle = scatter(axA, 0.6 + rand(1,10)*3.4, zeros(1,10), ...
+                            18, 'r', 'filled');
+    end
+
+    % Status line
+    set(txt,'String',sprintf(['r = %.1f \\mum,  \\mu = %.1f mPa·s,  f = %.1f Hz   |   ', ...
+                             'Instant Q = %.2f nL/s   |   Total V = %.2f \\muL'], ...
+                             r_um, mu_mPa, f, Q_nLs(k), V_uL(k)));
+
+    drawnow limitrate;
+
+    % Advance index, loop back
+    k = k + 1;
+    if k > N
+        k = 1;
+    end
+
+    pause(0.01);
+end
