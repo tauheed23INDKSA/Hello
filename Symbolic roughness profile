@@ -1,0 +1,68 @@
+######Symbolic roughness profile#######
+-------------------------------------------
+clc; clear; close all;
+
+%% 1) Symbolic roughness profile z(x)
+syms x
+
+% --- Parameters (
+L  = 8;      % profile length (mm)
+A1 = 4.0;     % amplitude 1 (micrometers)
+A2 = 1.0;     % amplitude 2 (micrometers)
+A3 = 0.6;     % amplitude 3 (micrometers)
+
+lam1 = 2.0;   % wavelength 1 (mm)
+lam2 = 0.7;   % wavelength 2 (mm)
+lam3 = 0.3;   % wavelength 3 (mm)
+
+% Gaussian "defects" (location, width, amplitude)
+x0_1 = 3.0;  s1 = 0.15;  D1 = 3.0;   % peak
+x0_2 = 7.0;  s2 = 0.25;  D2 = -2.0;  % pit (negative)
+
+%% 2) Build the symbolic function
+waviness = A1*sin(2*pi*x/lam1);
+rough1   = A2*sin(2*pi*x/lam2 + pi/6);
+rough2   = A3*sin(2*pi*x/lam3 + pi/3);
+
+defect1  = D1*exp(-((x - x0_1)/s1)^2);
+defect2  = D2*exp(-((x - x0_2)/s2)^2);
+
+z_sym = waviness + rough1 + rough2 + defect1 + defect2;
+
+% (Mean subtraction over [0, L] )
+z_mean = (1/L)*int(z_sym, x, 0, L);
+z0_sym = simplify(z_sym - z_mean);
+
+%% 3) Convert symbolic expression to numeric and sample it
+N = 2000;                     % number of samples
+xv = linspace(0, L, N);       % x locations
+z_fun = matlabFunction(z0_sym); % numeric function handle
+
+zv = z_fun(xv);               % evaluate profile
+
+%% 4) Plot the roughness profile
+figure;
+plot(xv, zv, 'LineWidth', 1.2);
+grid on;
+xlabel('x (mm)');
+ylabel('z ( \mum )');
+title('Symbolic Roughness Profile (Mean Line Removed)');
+
+%% 5) Roughness metrics (discrete approximations)
+% Ra: arithmetic average roughness
+Ra = mean(abs(zv));
+
+% Rq: root mean square roughness
+Rq = sqrt(mean(zv.^2));
+
+% Rz (simple): peak-to-valley height over the evaluation length
+Rz = max(zv) - min(zv);
+
+fprintf('Evaluation length L = %.2f mm\n', L);
+fprintf('Ra = %.4f micrometers\n', Ra);
+fprintf('Rq = %.4f micrometers\n', Rq);
+fprintf('Rz = %.4f micrometers\n', Rz);
+
+%% 6) Show the symbolic equation nicely (optional)
+disp('Symbolic roughness profile z0(x):');
+pretty(z0_sym)
