@@ -1,0 +1,408 @@
+######### GENETIC ALGORITHM ##############
+-------------------------------------------
+-------------------------------------------
+function GA_Ultimate_Classroom_Demo_Live_StartButton()
+
+    rng('default'); clc;
+
+    % ================== SETTINGS ==================
+    popSize = 100;
+    nVars   = 2;
+    nGen    = 20;
+
+    lb = [0 0];
+    ub = [10 10];
+
+    pcross = 0.8;
+    pmut   = 0.2;
+    sigma  = 0.5;
+
+    tourSize = 4;
+
+    autoPause_select    = 0.40;
+    autoPause_crossover = 0.25;
+    autoPause_mutation  = 0.25;
+    autoPause_eval      = 0.25;
+
+    tourRadius     = 0.22;
+    feasFaceAlpha  = 0.10; % very light shading
+
+    % ================== PROBLEM ==================
+    obj = @(P) 3*P(:,1) + 5*P(:,2); % maximize
+    A = [2 3;
+         2 1];
+    b = [12;
+          8];
+
+    viol   = @(P) max(0, max((A*P' - b), [], 1))';
+    isFeas = @(P) viol(P) <= 1e-10;
+    fitness = @(P) obj(P) - 1e6*(viol(P).^2);
+
+    % ================== FIGURE + LAYOUT ==================
+    fig = figure('Color','w', 'Name','Ultimate GA Live + Buttons)', ...
+                 'NumberTitle','off');
+
+    % Layout for plots
+    tiledlayout(1,2,'TileSpacing','compact','Padding','compact');
+
+    ax = nexttile(1);
+    hold(ax,'on'); grid(ax,'on');
+    xlabel(ax,'x_1'); ylabel(ax,'x_2');
+    xlim(ax,[lb(1) ub(1)]); ylim(ax,[lb(2) ub(2)]);
+    title(ax,'Design space (population + constraints + contours)');
+    axis(ax,'square');
+
+    ax2 = nexttile(2);
+    hold(ax2,'on'); grid(ax2,'on');
+    xlabel(ax2,'Generation'); ylabel(ax2,'Best feasible objective');
+    title(ax2,'Progress (best feasible so far)');
+    xlim(ax2,[0 nGen]);
+    ylim(ax2,[0 25]);
+
+    % Top label (no overlap)
+    hStepLabel = annotation(fig,'textbox', [0.01 0.93 0.98 0.06], ...
+        'String','Press Start (then use Next Step or Auto)', ...
+        'HorizontalAlignment','center', 'VerticalAlignment','middle', ...
+        'FontSize',14, 'FontWeight','bold', 'EdgeColor','none', ...
+        'BackgroundColor',[1 1 1]);
+
+    % ================== BUTTONS (Live Script friendly) ==================
+   
+    btnH = 0.05;  % button height
+    btnY = 0.01;  % bottom margin
+
+    hStart = uicontrol(fig,'Style','pushbutton','String','Start', ...
+        'Units','normalized','Position',[0.02 btnY 0.12 btnH], ...
+        'FontWeight','bold','Callback',@onStart);
+
+    hNext = uicontrol(fig,'Style','pushbutton','String','Next Step', ...
+        'Units','normalized','Position',[0.16 btnY 0.12 btnH], ...
+        'Enable','off','Callback',@onNext);
+
+    hAuto = uicontrol(fig,'Style','togglebutton','String','Auto: OFF', ...
+        'Units','normalized','Position',[0.30 btnY 0.12 btnH], ...
+        'Enable','off','Callback',@onAutoToggle);
+
+    hQuit = uicontrol(fig,'Style','pushbutton','String','Quit', ...
+        'Units','normalized','Position',[0.44 btnY 0.12 btnH], ...
+        'Callback',@onQuit);
+
+    % Small note
+    uicontrol(fig,'Style','text','String','(Live Script)', ...
+        'Units','normalized','Position',[0.60 btnY 0.38 btnH], ...
+        'BackgroundColor','w','HorizontalAlignment','left');
+
+    % ================== BACKGROUND (LEFT) ==================
+    feasPoly = [0 0; 4 0; 3 2; 0 4];
+    patch(ax, feasPoly(:,1), feasPoly(:,2), [0.60 0.80 1.00], ...
+        'EdgeColor','none', 'FaceAlpha', feasFaceAlpha);
+
+    xx = linspace(lb(1), ub(1), 400);
+    y1 = (12 - 2*xx)/3; y1(y1<lb(2) | y1>ub(2)) = NaN;
+    y2 =  8 - 2*xx;     y2(y2<lb(2) | y2>ub(2)) = NaN;
+    plot(ax, xx, y1, 'k-', 'LineWidth', 1.3);
+    plot(ax, xx, y2, 'k-', 'LineWidth', 1.3);
+
+    [Xg,Yg] = meshgrid(linspace(lb(1),ub(1),140), linspace(lb(2),ub(2),140));
+    Z = 3*Xg + 5*Yg;
+    contour(ax, Xg, Yg, Z, 12, 'LineWidth', 0.75);
+
+    hOpt = plot(ax, 3, 2, 'kp', 'MarkerSize', 14, 'LineWidth', 2);
+    text(ax, 3.2, 2.15, 'True optimum (3,2)', 'FontSize', 10);
+
+    % ================== DYNAMIC ELEMENTS ==================
+    hFeas = scatter(ax, nan, nan, 36, 'b', 'filled', 'MarkerFaceAlpha',0.85);
+    hInf  = scatter(ax, nan, nan, 36, 'r', 'filled', 'MarkerFaceAlpha',0.60);
+
+    hBest = plot(ax, nan, nan, 'p', 'MarkerSize', 16, 'LineWidth', 2, ...
+        'MarkerFaceColor',[1 0.84 0], 'MarkerEdgeColor','k');
+    hPath = plot(ax, nan, nan, '-', 'LineWidth', 2);
+
+    legend(ax, [hFeas,hInf,hBest,hOpt], ...
+        {'Feasible','Infeasible','Best feasible so far','True optimum'}, ...
+        'Location','northeastoutside');
+
+    bestHist = NaN(1,nGen+1);
+    genHist  = 0:nGen;
+    hCurve = plot(ax2, nan, nan, '-', 'LineWidth', 2);
+
+    tourHandles = gobjects(0);
+
+    % ================== STATE ==================
+    autoMode      = false;
+    started       = false;
+    quitNow       = false;
+    stepRequested = false;
+
+    % GA state
+    pop = [];
+    fit = [];
+    bestPath = [];
+    bestVal  = -Inf;
+    bestX    = [NaN NaN];
+
+    gen = 0;
+    phase = 0; % 0=select,1=cross,2=mut,3=eval
+    parents = [];
+    children = [];
+
+    drawnow;
+
+    % ================== MAIN LOOP ==================
+    
+    while isvalid(fig) && ~quitNow
+        pause(0.03);
+        drawnow;
+
+        if ~started
+            continue; % wait for Start
+        end
+
+        if gen >= nGen
+            finalize();
+            started = false;
+            set(hNext,'Enable','off');
+            set(hAuto,'Enable','off');
+            continue;
+        end
+
+        if autoMode
+            % Auto mode: advance automatically with timed pauses
+            stepOnceAuto();
+        else
+            % Step mode: advance only when Next Step is pressed
+            if stepRequested
+                stepRequested = false;
+                stepOnce();
+            end
+        end
+    end
+
+    % ================== STEP LOGIC ==================
+    function stepOnce()
+        % One phase step (Selection -> Crossover -> Mutation -> Evaluation)
+        switch phase
+            case 0 % Selection highlight
+                gen = gen + 1;
+                set(hStepLabel,'String',sprintf('Generation %d/%d | Selection (tournament)',gen,nGen));
+                showTwoTournamentHighlights(pop, fit);
+
+                parents = zeros(popSize,nVars);
+                for i = 1:popSize
+                    parents(i,:) = tournamentPick(pop, fit, tourSize);
+                end
+                phase = 1;
+
+            case 1 % Crossover
+                clearTournamentHighlights();
+                set(hStepLabel,'String',sprintf('Generation %d/%d | Crossover',gen,nGen));
+
+                children = parents;
+                for i = 1:2:popSize-1
+                    if rand < pcross
+                        alpha = rand(1,nVars);
+                        p1 = parents(i,:);
+                        p2 = parents(i+1,:);
+                        children(i,:)   = alpha.*p1 + (1-alpha).*p2;
+                        children(i+1,:) = alpha.*p2 + (1-alpha).*p1;
+                    end
+                end
+                updatePopulation(children);
+                phase = 2;
+
+            case 2 % Mutation
+                set(hStepLabel,'String',sprintf('Generation %d/%d | Mutation',gen,nGen));
+
+                mutMask = rand(popSize,nVars) < pmut;
+                mutated = children + sigma.*randn(popSize,nVars).*mutMask;
+                mutated = max(mutated, lb);
+                mutated = min(mutated, ub);
+
+                pop = mutated;
+                updatePopulation(pop);
+                phase = 3;
+
+            case 3 % Evaluation + replacement
+                set(hStepLabel,'String',sprintf('Generation %d/%d | Evaluation + replacement',gen,nGen));
+                fit = fitness(pop);
+
+                feasMask = isFeas(pop);
+                if any(feasMask)
+                    feasPop = pop(feasMask,:);
+                    feasObj = obj(feasPop);
+                    [bestThisVal, k] = max(feasObj);
+                    bestThisX = feasPop(k,:);
+                    if bestThisVal > bestVal
+                        bestVal = bestThisVal;
+                        bestX   = bestThisX;
+                    end
+                end
+                if isfinite(bestVal)
+                    bestPath = [bestPath; bestX]; 
+                end
+
+                updateBestTrajectory(bestX, bestPath);
+
+                bestHist(gen+1) = bestVal;
+                updateCurve(genHist, bestHist);
+
+                phase = 0;
+        end
+        drawnow;
+    end
+
+    function stepOnceAuto()
+        % Same as stepOnce but with pacing between phases
+        t = [autoPause_select, autoPause_crossover, autoPause_mutation, autoPause_eval];
+        stepOnce();
+        pause(t(phase+1));
+    end
+
+    % ================== CALLBACKS ==================
+    function onStart(~,~)
+        if started; return; end
+        started = true;
+
+        % Initialize GA state
+        pop = lb + rand(popSize,nVars).*(ub - lb);
+        fit = fitness(pop);
+
+        bestPath = [];
+        bestVal  = -Inf;
+        bestX    = [NaN NaN];
+        gen = 0;
+        phase = 0;
+
+        bestHist(:) = NaN;
+        updateCurve(genHist, bestHist);
+
+        updatePopulation(pop);
+        updateBestTrajectory([NaN NaN], []);
+        clearTournamentHighlights();
+
+        set(hStepLabel,'String','Started | Use Next Step (or toggle Auto)');
+        set(hNext,'Enable','on');
+        set(hAuto,'Enable','on');
+        set(hStart,'Enable','off'); 
+        drawnow;
+    end
+
+    function onNext(~,~)
+        if ~started; return; end
+        stepRequested = true;
+    end
+
+    function onAutoToggle(src,~)
+        autoMode = logical(get(src,'Value'));
+        if autoMode
+            set(src,'String','Auto: ON');
+        else
+            set(src,'String','Auto: OFF');
+        end
+        drawnow;
+    end
+
+    function onQuit(~,~)
+        quitNow = true;
+        if isvalid(fig), close(fig); end
+    end
+
+    % ================== PLOTTING HELPERS ==================
+    function p = tournamentPick(pop0, fit0, k)
+        idx = randi(size(pop0,1), k, 1);
+        [~,m] = max(fit0(idx));
+        p = pop0(idx(m),:);
+    end
+
+    function updatePopulation(P)
+        v = viol(P);
+        feas = (v <= 1e-10);
+        feasPts = P(feas,:);
+        infPts  = P(~feas,:);
+
+        set(hFeas, 'XData', feasPts(:,1), 'YData', feasPts(:,2));
+        set(hInf,  'XData', infPts(:,1),  'YData', infPts(:,2));
+    end
+
+    function updateBestTrajectory(xBest, path)
+        if all(isfinite(xBest))
+            set(hBest, 'XData', xBest(1), 'YData', xBest(2));
+        else
+            set(hBest, 'XData', NaN, 'YData', NaN);
+        end
+        if size(path,1) >= 2
+            set(hPath, 'XData', path(:,1), 'YData', path(:,2));
+        elseif size(path,1) == 1
+            set(hPath, 'XData', path(1,1), 'YData', path(1,2));
+        else
+            set(hPath, 'XData', NaN, 'YData', NaN);
+        end
+    end
+
+    function updateCurve(g, y)
+        valid = ~isnan(y);
+        set(hCurve, 'XData', g(valid), 'YData', y(valid));
+    end
+
+    function showTwoTournamentHighlights(P, fitP)
+        clearTournamentHighlights();
+
+        idx = randperm(size(P,1), 4);
+        t1 = idx(1:2); t2 = idx(3:4);
+
+        [~,w1loc] = max(fitP(t1)); w1 = t1(w1loc);
+        [~,w2loc] = max(fitP(t2)); w2 = t2(w2loc);
+
+        tourHandles = gobjects(0);
+        tourHandles(end+1) = drawCircle(P(t1(1),:), tourRadius, 1.5);
+        tourHandles(end+1) = drawCircle(P(t1(2),:), tourRadius, 1.5);
+        tourHandles(end+1) = drawCircle(P(t2(1),:), tourRadius, 1.5);
+        tourHandles(end+1) = drawCircle(P(t2(2),:), tourRadius, 1.5);
+
+        tourHandles(end+1) = drawCircle(P(w1,:), tourRadius*1.25, 3.0);
+        tourHandles(end+1) = drawCircle(P(w2,:), tourRadius*1.25, 3.0);
+
+        tourHandles(end+1) = text(ax, P(w1,1)+0.15, P(w1,2)+0.15, 'Winner T1', 'FontSize', 10, 'FontWeight','bold');
+        tourHandles(end+1) = text(ax, P(w2,1)+0.15, P(w2,2)+0.15, 'Winner T2', 'FontSize', 10, 'FontWeight','bold');
+
+        tourHandles(end+1) = drawArrow(P(t1(1),:), P(w1,:));
+        tourHandles(end+1) = drawArrow(P(t1(2),:), P(w1,:));
+        tourHandles(end+1) = drawArrow(P(t2(1),:), P(w2,:));
+        tourHandles(end+1) = drawArrow(P(t2(2),:), P(w2,:));
+    end
+
+    function h = drawCircle(center, radius, lineW)
+        th = linspace(0, 2*pi, 100);
+        x = center(1) + radius*cos(th);
+        y = center(2) + radius*sin(th);
+        h = plot(ax, x, y, 'k-', 'LineWidth', lineW);
+    end
+
+    function h = drawArrow(pFrom, pTo)
+        dx = pTo(1) - pFrom(1);
+        dy = pTo(2) - pFrom(2);
+        if abs(dx) < 1e-12 && abs(dy) < 1e-12
+            h = plot(ax, NaN, NaN);
+            return;
+        end
+        h = quiver(ax, pFrom(1), pFrom(2), dx, dy, 0, ...
+            'LineWidth', 1.5, 'MaxHeadSize', 0.8);
+    end
+
+    function clearTournamentHighlights()
+        if ~isempty(tourHandles)
+            delete(tourHandles(ishandle(tourHandles)));
+            tourHandles = gobjects(0);
+        end
+    end
+
+    function finalize()
+        set(hStart,'Enable','on'); 
+        if isfinite(bestVal)
+            set(hStepLabel,'String',sprintf('Done. Best feasible: (%.3f, %.3f), obj=%.3f', bestX(1), bestX(2), bestVal));
+        else
+            set(hStepLabel,'String','Done. No feasible found (increase gens / adjust params).');
+        end
+        drawnow;
+    end
+end
