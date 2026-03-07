@@ -1,0 +1,176 @@
+%% Euler Column Buckling
+% Buckling critical load:
+%   Pcr = (pi^2 * E * I) / (K*L)^2
+%
+% End condition (effective length factor K):
+%   Pinned-Pinned: 1.0
+%   Fixed-Fixed:   0.5
+%   Fixed-Pinned:  0.699
+%   Fixed-Free:    2.0
+
+clear; clc; close all;
+
+%% Figure
+fig = figure('Color','w','Position',[80 80 1100 600], ...
+    'Name','Euler Column Buckling (Interactive)');
+
+% Plot axes
+ax = axes('Parent',fig,'Position',[0.08 0.18 0.50 0.74]);
+hold(ax,'on'); grid(ax,'on'); axis(ax,'equal');
+xlabel(ax,'Lateral deflection x (m)');
+ylabel(ax,'Column axis y (m)');
+title(ax,'Buckling Shape (1st Mode)');
+set(ax,'YDir','reverse'); % top at y=0 like a hanging column (visual preference)
+
+% Text panel
+info = uicontrol('Style','text','Parent',fig,'Units','normalized', ...
+    'Position',[0.62 0.72 0.35 0.20],'FontSize',12,'BackgroundColor','w', ...
+    'HorizontalAlignment','left','String','');
+
+%% Default parameters
+L0 = 1.0;           % m
+E0 = 200e9;         % Pa (steel)
+I0 = 1.0e-8;        % m^4 (small beam)
+P0 = 5e3;           % N
+K0 = 1.0;           % pinned-pinned
+
+%% Sliders
+% Length
+uicontrol('Style','text','Parent',fig,'Units','normalized','BackgroundColor','w', ...
+    'Position',[0.62 0.63 0.12 0.04],'String','Length L (m)','FontSize',10);
+sL = uicontrol('Style','slider','Parent',fig,'Units','normalized', ...
+    'Position',[0.74 0.64 0.20 0.03],'Min',0.2,'Max',3.0,'Value',L0);
+
+% E
+uicontrol('Style','text','Parent',fig,'Units','normalized','BackgroundColor','w', ...
+    'Position',[0.62 0.57 0.12 0.04],'String','E (GPa)','FontSize',10);
+sE = uicontrol('Style','slider','Parent',fig,'Units','normalized', ...
+    'Position',[0.74 0.58 0.20 0.03],'Min',10,'Max',250,'Value',E0/1e9);
+
+% I
+uicontrol('Style','text','Parent',fig,'Units','normalized','BackgroundColor','w', ...
+    'Position',[0.62 0.51 0.12 0.04],'String','I (×10^{-8} m^4)','FontSize',10);
+sI = uicontrol('Style','slider','Parent',fig,'Units','normalized', ...
+    'Position',[0.74 0.52 0.20 0.03],'Min',0.1,'Max',20,'Value',I0/1e-8);
+
+% P
+uicontrol('Style','text','Parent',fig,'Units','normalized','BackgroundColor','w', ...
+    'Position',[0.62 0.45 0.12 0.04],'String','Load P (kN)','FontSize',10);
+sP = uicontrol('Style','slider','Parent',fig,'Units','normalized', ...
+    'Position',[0.74 0.46 0.20 0.03],'Min',0,'Max',50,'Value',P0/1000);
+
+% End condition popup (K factor)
+uicontrol('Style','text','Parent',fig,'Units','normalized','BackgroundColor','w', ...
+    'Position',[0.62 0.38 0.12 0.04],'String','End condition','FontSize',10);
+
+popup = uicontrol('Style','popupmenu','Parent',fig,'Units','normalized', ...
+    'Position',[0.74 0.39 0.20 0.04], ...
+    'String',{'Pinned-Pinned (K=1.0)','Fixed-Fixed (K=0.5)', ...
+              'Fixed-Pinned (K=0.699)','Fixed-Free (K=2.0)'}, ...
+    'Value',1);
+
+% Value readouts
+val = uicontrol('Style','text','Parent',fig,'Units','normalized','BackgroundColor','w', ...
+    'Position',[0.62 0.25 0.35 0.10],'FontSize',11,'HorizontalAlignment','left','String','');
+
+%% Column graphics (initialize)
+n = 200;
+y = linspace(0,1,n)';         % normalized
+x = zeros(size(y));
+colLine = plot(ax,x,y,'k','LineWidth',3);        % column centerline
+midPt  = plot(ax,0,0,'ro','MarkerFaceColor','r');% highlight point
+
+% Supports markers
+supportTop = plot(ax,0,0,'ks','MarkerFaceColor','k','MarkerSize',7);
+supportBot = plot(ax,0,1,'ks','MarkerFaceColor','k','MarkerSize',7);
+
+% Set initial axis limits (updated in loop too)
+xlim(ax,[-0.15 0.15]); ylim(ax,[0 1]);
+
+%% Main loop (animation)
+t0 = tic;
+while ishandle(fig)
+
+    % Read controls
+    L = get(sL,'Value');
+    E = get(sE,'Value')*1e9;
+    I = get(sI,'Value')*1e-8;
+    P = get(sP,'Value')*1000;
+
+    % Effective length factor K
+    kSel = get(popup,'Value');
+    if kSel==1
+        K = 1.0;
+    elseif kSel==2
+        K = 0.5;
+    elseif kSel==3
+        K = 0.699;
+    else
+        K = 2.0;
+    end
+
+    % Critical load
+    Pcr = (pi^2 * E * I) / (K*L)^2;
+
+    % Load ratio
+    lambda = P / max(Pcr, eps);
+
+    imperf = 0.002 * L;  % small imperfection [m]
+    if lambda <= 1
+        A = imperf * (0.3 + 0.7*lambda); % small change
+        statusStr = 'Stable (P < P_{cr})';
+    else
+        A = imperf + 0.03*L*min((lambda-1), 3); % grow, capped
+        statusStr = 'Buckling (P > P_{cr})';
+    end
+
+    
+    yy = linspace(0,L,n)';
+
+    switch kSel
+        case 1 % pinned-pinned
+            xx = A * sin(pi*yy/L);
+        case 2 % fixed-fixed
+            xx = A * (1 - cos(2*pi*yy/L))/2;
+        case 3 % fixed-pinned (rough visual)
+            xx = A * sin(pi*yy/L) .* (0.6 + 0.4*(yy/L));
+        case 4 % fixed-free (cantilever-ish visual)
+            xx = A * (1 - cos((pi/2)*yy/L));
+    end
+
+    % Add gentle animation wiggle when buckled
+    time = toc(t0);
+    if lambda > 1
+        xx = xx .* (1 + 0.05*sin(6*time));
+    end
+
+    % Update plot
+    set(colLine,'XData',xx,'YData',yy);
+
+    % Highlight mid-height point
+    [~,midIdx] = min(abs(yy - L/2));
+    set(midPt,'XData',xx(midIdx),'YData',yy(midIdx));
+
+    % Supports
+    set(supportTop,'XData',0,'YData',0);
+    set(supportBot,'XData',0,'YData',L);
+
+    % Update axes limits
+    span = max(0.05*L, 4*max(abs(xx)));
+    xlim(ax,[-span span]);
+    ylim(ax,[0 L]);
+
+    % Text output
+    set(info,'String',sprintf([ ...
+        'Euler Buckling Theory\n', ...
+        'P_{cr} = \\pi^2 E I / (K L)^2\n\n', ...
+        'Status: %s\n'], statusStr));
+
+    set(val,'String',sprintf([ ...
+        'L = %.2f m\nE = %.1f GPa\nI = %.2g m^4\nK = %.3f\n\n', ...
+        'P = %.2f kN\nP_{cr} = %.2f kN\nP/P_{cr} = %.2f'], ...
+        L, E/1e9, I, K, P/1000, Pcr/1000, lambda));
+
+    drawnow limitrate;
+    pause(0.02);
+end
