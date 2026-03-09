@@ -1,0 +1,148 @@
+%% SMD_Interactive_Sliders.m
+% Interactive demo with sliders + animation (ODE45)
+
+
+function SMD_Interactive_Sliders
+close all;
+
+%% Defaults
+p.m  = 1.0;
+p.k  = 80.0;
+p.c  = 1.2;
+p.F0 = 6.0;
+p.w  = 7.0;
+p.mode = "forced";  % "free" or "forced"
+
+p.x0 = 0.10;
+p.v0 = 0.00;
+
+p.dt = 0.01;
+p.tEnd = 10;
+
+%% UI
+fig = uifigure('Name','SMD Interactive (ODE + Animation)','Color','w');
+gl = uigridlayout(fig,[1 2]);
+gl.ColumnWidth = {260,'1x'};
+
+left = uipanel(gl,'Title','Controls');
+leftLayout = uigridlayout(left,[10 1]);
+leftLayout.RowHeight = {22,22,22,22,22,22,22,22,'1x',22};
+
+modeDrop = uidropdown(leftLayout,'Items',{'free','forced'},'Value',p.mode);
+
+lblC  = uilabel(leftLayout,'Text','Damping c (N*s/m)');
+sC    = uislider(leftLayout,'Limits',[0 10],'Value',p.c);
+
+lblF0 = uilabel(leftLayout,'Text','Force amplitude F0 (N) (forced only)');
+sF0   = uislider(leftLayout,'Limits',[0 20],'Value',p.F0);
+
+lblW  = uilabel(leftLayout,'Text','Forcing frequency \omega (rad/s) (forced only)');
+sW    = uislider(leftLayout,'Limits',[0 20],'Value',p.w);
+
+lblX0 = uilabel(leftLayout,'Text','Initial displacement x0 (m)');
+sX0   = uislider(leftLayout,'Limits',[-0.3 0.3],'Value',p.x0);
+
+lblV0 = uilabel(leftLayout,'Text','Initial velocity v0 (m/s)');
+sV0   = uislider(leftLayout,'Limits',[-2 2],'Value',p.v0);
+
+spacer = uilabel(leftLayout,'Text','');
+
+btnRun = uibutton(leftLayout,'Text','Run / Update','ButtonPushedFcn',@runAndAnimate);
+
+right = uipanel(gl,'Title','Animation');
+rightLayout = uigridlayout(right,[2 2]);
+rightLayout.RowHeight = {'1x','1x'};
+rightLayout.ColumnWidth = {'1x','1x'};
+
+axAnim = uiaxes(rightLayout); axAnim.Layout.Row = [1 2]; axAnim.Layout.Column = 1;
+axX    = uiaxes(rightLayout); axX.Layout.Row = 1; axX.Layout.Column = 2;
+axV    = uiaxes(rightLayout); axV.Layout.Row = 2; axV.Layout.Column = 2;
+
+% Initial run
+runAndAnimate();
+
+%% ---------------- nested function ----------------
+    function runAndAnimate(~,~)
+        % Read UI -> parameters
+        p.mode = string(modeDrop.Value);
+        p.c  = sC.Value;
+        p.F0 = sF0.Value;
+        p.w  = sW.Value;
+        p.x0 = sX0.Value;
+        p.v0 = sV0.Value;
+
+        % Force function
+        if p.mode == "free"
+            F = @(t) 0;
+        else
+            F = @(t) p.F0*sin(p.w*t);
+        end
+
+        % Solve ODE
+        tspan = 0:p.dt:p.tEnd;
+        odefun = @(t,y) [y(2); (F(t) - p.c*y(2) - p.k*y(1))/p.m];
+        opts = odeset('RelTol',1e-7,'AbsTol',1e-9);
+        [t,y] = ode45(odefun, tspan, [p.x0; p.v0], opts);
+
+        x = y(:,1); v = y(:,2);
+        a = (arrayfun(F,t) - p.c.*v - p.k.*x)./p.m;
+
+        % Clear axes
+        cla(axAnim); cla(axX); cla(axV);
+
+        % Animation axes setup
+        axAnim.Box = 'on';
+        grid(axAnim,'on');
+        title(axAnim, "Mode: " + upper(p.mode));
+        xlabel(axAnim,'Position (m)'); axAnim.YTick = [];
+        axis(axAnim, [-0.05 1.05 -0.25 0.25]);
+
+        wallX = 0; eqX = 0.50;
+        plot(axAnim,[wallX wallX],[-0.2 0.2],'k','LineWidth',4); hold(axAnim,'on');
+
+        blockW = 0.12; blockH = 0.10;
+
+        makeSpring = @(x0,x1,y0,nCoils,amp) deal( ...
+            linspace(x0,x1, 2*nCoils+2), ...
+            y0 + amp * [0 repmat([1 -1],1,nCoils) 0] ...
+        );
+        nCoils = 10; amp = 0.05;
+
+        xMass = eqX + x(1);
+        springLine = plot(axAnim,[wallX xMass],[0 0],'b','LineWidth',2);
+        massRect = rectangle(axAnim,'Position',[xMass-blockW/2, -blockH/2, blockW, blockH], ...
+            'FaceColor',[0.85 0.2 0.2],'EdgeColor','k','LineWidth',1.5);
+        txt = text(axAnim, 0.05, 0.18, '', 'FontSize', 11, 'FontWeight','bold');
+
+        % Time plots
+        grid(axX,'on'); title(axX,'Displacement'); xlabel(axX,'Time (s)'); ylabel(axX,'x (m)'); hold(axX,'on');
+        grid(axV,'on'); title(axV,'Velocity');     xlabel(axV,'Time (s)'); ylabel(axV,'v (m/s)'); hold(axV,'on');
+
+        xLine = plot(axX, t(1), x(1), 'LineWidth', 1.5);
+        vLine = plot(axV, t(1), v(1), 'LineWidth', 1.5);
+        xMark = plot(axX, t(1), x(1), 'o', 'MarkerFaceColor','k');
+        vMark = plot(axV, t(1), v(1), 'o', 'MarkerFaceColor','k');
+
+        xlim(axX,[0 p.tEnd]); ylim(axX,[min(x)-0.05 max(x)+0.05]);
+        xlim(axV,[0 p.tEnd]); ylim(axV,[min(v)-0.2  max(v)+0.2 ]);
+
+        % Animate
+        for i = 1:numel(t)
+            xMass = eqX + x(i);
+            [sx, sy] = makeSpring(wallX, xMass - blockW/2, 0, nCoils, amp);
+            set(springLine,'XData',sx,'YData',sy);
+            massRect.Position = [xMass-blockW/2, -blockH/2, blockW, blockH];
+
+            txt.String = sprintf('t = %.2f s\nx = %.4f m\nv = %.4f m/s\na = %.4f m/s^2', ...
+                t(i), x(i), v(i), a(i));
+
+            set(xLine,'XData',t(1:i),'YData',x(1:i));
+            set(vLine,'XData',t(1:i),'YData',v(1:i));
+            set(xMark,'XData',t(i),'YData',x(i));
+            set(vMark,'XData',t(i),'YData',v(i));
+
+            drawnow;
+            if ~isvalid(fig); return; end
+        end
+    end
+end
