@@ -1,0 +1,115 @@
+%% SMD_SideBySide_FreeVsForced.m
+% Side-by-side animation: FREE (left) vs FORCED (right) using ODE45
+
+clear; clc; close all;
+
+%% Parameters (same m,k,c for both)
+m = 1.0;  k = 80.0;  c = 1.2;
+
+% Free ICs
+x0_free = 0.10; v0_free = 0.00;
+
+% Forced ICs
+x0_forced = 0.00; v0_forced = 0.00;
+F0 = 6.0;  w = 7.0;
+
+% Time
+dt = 0.01; tEnd = 10;
+tspan = 0:dt:tEnd;
+
+%% Force
+Ffree   = @(t) 0;
+Fforced = @(t) F0*sin(w*t);
+
+%% ODEs
+odeFree   = @(t,y) [y(2); (Ffree(t)   - c*y(2) - k*y(1))/m];
+odeForced = @(t,y) [y(2); (Fforced(t) - c*y(2) - k*y(1))/m];
+
+opts = odeset('RelTol',1e-7,'AbsTol',1e-9);
+
+[t1,y1] = ode45(odeFree,   tspan, [x0_free;   v0_free],   opts);
+[t2,y2] = ode45(odeForced, tspan, [x0_forced; v0_forced], opts);
+
+% Use same time base length (they should match, but keep safe)
+N = min(numel(t1), numel(t2));
+t = t1(1:N);
+
+xFree = y1(1:N,1); vFree = y1(1:N,2);
+xForc = y2(1:N,1); vForc = y2(1:N,2);
+
+%% Figure
+fig = figure('Color','w','Name','Free vs Forced (Side-by-Side)');
+tiledlayout(2,2,'Padding','compact','TileSpacing','compact');
+
+axFree = nexttile(1); hold(axFree,'on'); grid(axFree,'on');
+axForc = nexttile(2); hold(axForc,'on'); grid(axForc,'on');
+
+axX = nexttile(3,[1 2]); hold(axX,'on'); grid(axX,'on');
+
+title(axFree,'FREE vibration');  xlabel(axFree,'Position (m)'); axFree.YTick=[];
+title(axForc,'FORCED vibration');xlabel(axForc,'Position (m)'); axForc.YTick=[];
+title(axX,'Displacement comparison'); xlabel(axX,'Time (s)'); ylabel(axX,'x (m)');
+
+axis(axFree,[-0.05 1.05 -0.25 0.25]);
+axis(axForc,[-0.05 1.05 -0.25 0.25]);
+xlim(axX,[0 tEnd]);
+
+% Draw walls
+wallX = 0; eqX = 0.50;
+plot(axFree,[wallX wallX],[-0.2 0.2],'k','LineWidth',4);
+plot(axForc,[wallX wallX],[-0.2 0.2],'k','LineWidth',4);
+
+% Block & spring
+blockW = 0.12; blockH = 0.10;
+
+makeSpring = @(x0,x1,y0,nCoils,amp) deal( ...
+    linspace(x0,x1, 2*nCoils+2), ...
+    y0 + amp * [0 repmat([1 -1],1,nCoils) 0] ...
+);
+nCoils = 10; amp = 0.05;
+
+% Initialize graphics (FREE)
+xMassF = eqX + xFree(1);
+[sx,sy] = makeSpring(wallX, xMassF - blockW/2, 0, nCoils, amp);
+sprFree = plot(axFree,sx,sy,'b','LineWidth',2);
+rectFree = rectangle(axFree,'Position',[xMassF-blockW/2,-blockH/2,blockW,blockH], ...
+    'FaceColor',[0.2 0.55 0.9],'EdgeColor','k','LineWidth',1.5);
+txtFree = text(axFree,0.05,0.18,'','FontSize',10,'FontWeight','bold');
+
+% Initialize graphics (FORCED)
+xMassR = eqX + xForc(1);
+[sx,sy] = makeSpring(wallX, xMassR - blockW/2, 0, nCoils, amp);
+sprForc = plot(axForc,sx,sy,'b','LineWidth',2);
+rectForc = rectangle(axForc,'Position',[xMassR-blockW/2,-blockH/2,blockW,blockH], ...
+    'FaceColor',[0.85 0.2 0.2],'EdgeColor','k','LineWidth',1.5);
+txtForc = text(axForc,0.05,0.18,'','FontSize',10,'FontWeight','bold');
+
+% Comparison lines
+lineFree = plot(axX,t(1),xFree(1),'LineWidth',1.5);
+lineForc = plot(axX,t(1),xForc(1),'LineWidth',1.5);
+legend(axX,{'Free','Forced'},'Location','best');
+
+ylim(axX,[min([xFree; xForc])-0.05, max([xFree; xForc])+0.05]);
+
+%% Animate both
+for i = 1:N
+    % FREE update
+    xMassF = eqX + xFree(i);
+    [sx,sy] = makeSpring(wallX, xMassF - blockW/2, 0, nCoils, amp);
+    set(sprFree,'XData',sx,'YData',sy);
+    rectFree.Position = [xMassF-blockW/2,-blockH/2,blockW,blockH];
+    txtFree.String = sprintf('t=%.2f\nx=%.3f\nv=%.3f', t(i), xFree(i), vFree(i));
+
+    % FORCED update
+    xMassR = eqX + xForc(i);
+    [sx,sy] = makeSpring(wallX, xMassR - blockW/2, 0, nCoils, amp);
+    set(sprForc,'XData',sx,'YData',sy);
+    rectForc.Position = [xMassR-blockW/2,-blockH/2,blockW,blockH];
+    txtForc.String = sprintf('t=%.2f\nx=%.3f\nv=%.3f', t(i), xForc(i), vForc(i));
+
+    % Comparison plot update
+    set(lineFree,'XData',t(1:i),'YData',xFree(1:i));
+    set(lineForc,'XData',t(1:i),'YData',xForc(1:i));
+
+    drawnow;
+end
