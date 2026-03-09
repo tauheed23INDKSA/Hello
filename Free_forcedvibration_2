@@ -1,0 +1,153 @@
+%% Spring-Mass-Damper: Free + Forced Vibration Animation (ODE45)
+% Animated ODE visualization for a 1-DOF system:
+%   m*xdd + c*xd + k*x = F(t)
+%
+% Free vibration:   F(t) = 0
+% Forced vibration: F(t) = F0*sin(w*t)
+
+clear; clc; close all;
+
+%% Parameters
+m  = 1.0;        % mass (kg)
+k  = 50.0;       % spring stiffness (N/m)
+c  = 1.0;        % damping (N*s/m)
+
+x0 = 0.10;       % initial displacement (m)
+v0 = 0.00;       % initial velocity (m/s)
+
+% Forcing parameters (used in forced case)
+F0 = 5.0;        % force amplitude (N)
+w  = 6.0;        % forcing circular frequency (rad/s)
+
+% Simulation settings
+tEnd = 10;       % seconds
+dt   = 0.01;     % animation time step
+tspan = 0:dt:tEnd;
+
+%% Choose mode: "free" or "forced"
+mode = "forced";  % change to "free" for free vibration
+
+%% ODE definition
+% state y = [x; v]
+switch mode
+    case "free"
+        F = @(t) 0;
+    case "forced"
+        F = @(t) F0*sin(w*t);
+    otherwise
+        error('mode must be "free" or "forced"');
+end
+
+odefun = @(t,y) [ ...
+    y(2); ...
+    (F(t) - c*y(2) - k*y(1))/m ...
+];
+
+%% Solve ODE
+y0 = [x0; v0];
+opts = odeset('RelTol',1e-7,'AbsTol',1e-9);
+[tSol, ySol] = ode45(odefun, tspan, y0, opts);
+
+x = ySol(:,1);
+v = ySol(:,2);
+
+% Acceleration (post-process)
+a = (arrayfun(F, tSol) - c.*v - k.*x)./m;
+
+%% Visualization setup
+% Geometry (1D along x-axis)
+wallX   = 0;           % wall location
+eqX     = 0.5;         % equilibrium mass center position
+scaleX  = 1.0;         % scaling for display (keep at 1 unless needed)
+
+% Mass block size
+blockW = 0.12;
+blockH = 0.10;
+
+% Plot limits
+xMin = -0.05;
+xMax = 1.05;
+
+% Create figure
+fig = figure('Color','w','Name','Spring-Mass-Damper Animation');
+tiledlayout(2,2,'Padding','compact','TileSpacing','compact');
+
+% Animation axes
+axAnim = nexttile([2 1]);
+hold(axAnim,'on'); grid(axAnim,'on');
+axis(axAnim,[xMin xMax -0.25 0.25]);
+axAnim.YTick = [];
+xlabel(axAnim,'Position (m)'); title(axAnim, sprintf('Mode: %s vibration', mode));
+
+% Draw wall
+plot(axAnim,[wallX wallX],[-0.2 0.2],'k','LineWidth',4);
+
+% Initial positions
+xMass = eqX + scaleX*x(1);
+
+% Spring line (will be updated)
+springLine = plot(axAnim,[wallX xMass],[0 0],'b','LineWidth',2);
+
+% Mass block (rectangle) (will be updated)
+massRect = rectangle(axAnim,'Position',[xMass-blockW/2, -blockH/2, blockW, blockH], ...
+    'FaceColor',[0.85 0.2 0.2],'EdgeColor','k','LineWidth',1.5);
+
+% Text readout
+txt = text(axAnim, 0.05, 0.18, '', 'FontSize', 11, 'FontWeight','bold');
+
+% Time histories
+axX = nexttile; hold(axX,'on'); grid(axX,'on');
+xlabel(axX,'Time (s)'); ylabel(axX,'x (m)'); title(axX,'Displacement');
+xLine = plot(axX, tSol(1), x(1), 'LineWidth', 1.5);
+xMarker = plot(axX, tSol(1), x(1), 'o', 'MarkerFaceColor','k');
+
+axV = nexttile; hold(axV,'on'); grid(axV,'on');
+xlabel(axV,'Time (s)'); ylabel(axV,'v (m/s)'); title(axV,'Velocity');
+vLine = plot(axV, tSol(1), v(1), 'LineWidth', 1.5);
+vMarker = plot(axV, tSol(1), v(1), 'o', 'MarkerFaceColor','k');
+
+% Pre-set limits for time plots
+xlim(axX,[0 tEnd]); xlim(axV,[0 tEnd]);
+ylim(axX,[min(x)-0.05 max(x)+0.05]);
+ylim(axV,[min(v)-0.2  max(v)+0.2 ]);
+
+%% Make a spring shape (zig-zag) helper
+makeSpring = @(x0,x1,y0,nCoils,amp) ...
+    deal( ...
+        linspace(x0,x1, 2*nCoils+2), ...
+        y0 + amp * [0 repmat([1 -1],1,nCoils) 0] ...
+    );
+
+nCoils = 10;
+amp    = 0.05;
+
+%% Animate
+for i = 1:length(tSol)
+    % Current state
+    xi = x(i);
+    vi = v(i);
+    ai = a(i);
+    ti = tSol(i);
+
+    % Update mass position
+    xMass = eqX + scaleX*xi;
+
+    % Update spring graphic
+    [sx, sy] = makeSpring(wallX, xMass - blockW/2, 0, nCoils, amp);
+    set(springLine, 'XData', sx, 'YData', sy);
+
+    % Update mass rectangle
+    massRect.Position = [xMass-blockW/2, -blockH/2, blockW, blockH];
+
+    % Update text
+    set(txt,'String',sprintf('t = %.2f s\nx = %.4f m\nv = %.4f m/s\na = %.4f m/s^2', ...
+        ti, xi, vi, ai));
+
+    % Update time plots (grow lines)
+    set(xLine, 'XData', tSol(1:i), 'YData', x(1:i));
+    set(vLine, 'XData', tSol(1:i), 'YData', v(1:i));
+    set(xMarker,'XData',ti,'YData',xi);
+    set(vMarker,'XData',ti,'YData',vi);
+
+    drawnow;
+end
